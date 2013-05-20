@@ -20,7 +20,7 @@ var traverse = function (node, cb) {
 };
 
 var walk = function (src, cb) {
-    var ast = esprima.parse(src);
+    var ast = esprima.parse(src, { range: true });
     traverse(ast, cb);
 };
 
@@ -30,10 +30,21 @@ var exports = module.exports = function (src, opts) {
 
 exports.find = function (src, opts) {
     if (!opts) opts = {};
+    var rangeOffset = 0;
     var word = opts.word === undefined ? 'require' : opts.word;
     if (typeof src !== 'string') src = String(src);
-    src = '(function(){' + src.replace(/^#![^\n]*\n/, '') + '\n})()';
-    
+
+    // Remove any hashbang content, modifying subsequent ranges to match
+    rangeOffset += src.length;
+    src = src.replace(/^#![^\n]*\n/, '');
+    rangeOffset -= src.length;
+
+    // Wrap the provided source within its own scope, modifying subsequent ranges to match
+    var presrc = '(function(){';
+    var postsrc = '\n})()';
+    src = presrc + src + postsrc;
+    rangeOffset -= presrc.length;
+
     function isRequire (node) {
         var c = node.callee;
         return c
@@ -45,6 +56,7 @@ exports.find = function (src, opts) {
     
     var modules = { strings : [], expressions : [] };
     if (opts.nodes) modules.nodes = [];
+    if (opts.ranges) modules.stringRanges = [];
     
     if (src.indexOf(word) == -1) return modules;
     
@@ -53,6 +65,9 @@ exports.find = function (src, opts) {
         if (node.arguments.length
         && node.arguments[0].type === 'Literal') {
             modules.strings.push(node.arguments[0].value);
+            if (opts.ranges) {
+                modules.stringRanges.push([node.arguments[0].range[0] + rangeOffset, node.arguments[0].range[1] + rangeOffset]);
+            }
         }
         else {
             modules.expressions.push(escodegen.generate(node.arguments[0]));
